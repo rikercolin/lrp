@@ -1,7 +1,11 @@
 import re
 import datetime
 import pyap
+import time
+import util
 from enum import Enum
+
+debug = False
 
 
 class Result_Class(Enum):
@@ -12,26 +16,34 @@ class Result_Class(Enum):
 
 
 class Answer:
-    def __init__(self, doc_id, word, surroundings):
+    def __init__(self, doc_id, word, surroundings, cordinates):
         self.doc_id = doc_id
         self.word = word
         self.surroundings = surroundings
+        self.start_cordinate = cordinates[0]
+        self.end_cordinate = cordinates[1]
 
     def __str__(self):
-        if True:
-            return "{word} - {surroundings}".format(word=self.word, surroundings=self.surroundings)
+        if debug:
+            return "{word} - {surroundings} | {start}-{end}".format(
+                word=self.word,
+                surroundings=util.file_formating(self.surroundings), start=self.start_cordinate, end=self.end_cordinate)
         return "{word}".format(word=self.word)
 
 
 class Guess:
-    def __init__(self, doc_id, word, surroundings):
+    def __init__(self, doc_id, word, surroundings, cordinates):
         self.doc_id = doc_id
         self.word = word
         self.surroundings = surroundings
+        self.start_cordinate = cordinates[0]
+        self.end_cordinate = cordinates[1]
 
     def __str__(self):
-        if True:
-            return "{word} - {surroundings}".format(word=self.word, surroundings=self.surroundings)
+        if debug:
+            return "{word} - {surroundings} | {start}-{end}".format(
+                word=self.word,
+                surroundings=util.file_formating(self.surroundings), start=self.start_cordinate, end=self.end_cordinate)
         return "{word}".format(word=self.word)
 
 
@@ -75,7 +87,7 @@ class Result:
             return False
 
         if not self.answer == None:
-            if normalize_characters(guess.word) == normalize_characters(self.answer.word):
+            if util.normalize_characters(guess.word) == util.normalize_characters(self.answer.word):
                 self.guess = guess
                 self.answered = True
                 self.classify()
@@ -97,8 +109,8 @@ class Result:
             self.time_out()
             return False
 
-        if not self.answer == None:
-            if re.match(guess.word, self.answer.word) or re.match(self.answer.word, guess.word):
+        if not isinstance(self.answer, type(None)):
+            if util.is_substring(util.normalize_characters(self.answer.word), util.normalize_characters(guess.word)) | util.is_substring(util.normalize_characters(guess.word), util.normalize_characters(self.answer.word)):
                 self.guess = guess
                 self.answered = True
                 self.classify()
@@ -111,7 +123,43 @@ class Result:
             self.classify()
             return False
 
-    ''' Classify() attempts to analyise it's internal parameters and decided on
+    ''' Cordinate_Compare() takes the regex match cordinates and the answer
+    cordinates and compares to see if they have a union of the two intervals.
+    '''
+
+    def cordinate_compare(self, guess):
+        if isinstance(self.answer, type(None)):
+            self.classify()
+            return False
+
+        if not guess.doc_id == self.doc_id:
+            self.time_out()
+            return False
+
+        a_start = self.answer.start_cordinate
+        a_end = self.answer.end_cordinate
+        g_start = guess.start_cordinate
+        g_end = guess.end_cordinate
+
+        # Answer contains guess cordinates
+        if a_start <= g_start and a_end >= g_end:
+            self.guess = guess
+            self.answered = True
+            self.classify()
+            return True
+
+        # Guess contains Answer cordinates
+        elif g_start <= a_start and g_end >= a_end:
+            self.guess = guess
+            self.answered = True
+            self.classify()
+            return True
+
+        else:
+            self.classify()
+            return False
+
+    ''' Classify() attemts to analyise it's internal parameters and decided on
     it's results class, True Positive, False Negative or False Positive.
     '''
 
@@ -172,17 +220,17 @@ class Outcome:
         pass
 
 
-def test(documents):
+def test(documents, tebug):
     print("[Starting Testing]")
+    debug = tebug
 
     total_hits = 0
     total_possible_hits = 0
     true_positives = 0
-    time_elapsed = 0
 
     results = []
 
-    start_time = datetime.datetime.now()
+    start_time = time.perf_counter()
     for document in documents:
         results.extend(pyap_guesser(document))
 
@@ -195,8 +243,29 @@ def test(documents):
             total_hits += 1
         elif result.classification == Result_Class.FALSE_NEGATIVE:
             total_possible_hits += 1
-    time_elapsed = 4
-    return Outcome(total_hits, total_possible_hits, true_positives, time_elapsed)
+
+    if debug:
+        with open('results.txt', 'w', encoding='utf-8') as f:
+            for result in results:
+                t = ''
+                if result.classification == Result_Class.TRUE_POSITIVE:
+                    t = '{}, {} : {}\n'.format(result.classification.name, util.file_formating(
+                        str(result.answer)), util.file_formating(str(result.guess)))
+                    pass
+                if result.classification == Result_Class.FALSE_POSITIVE:
+                    t = '{}, {}\n'.format(
+                        result.classification.name, util.file_formating(str(result.guess)))
+                    pass
+                elif result.classification == Result_Class.FALSE_NEGATIVE:
+                    t = '{}, {}\n'.format(
+                        result.classification.name, util.file_formating(str(result.answer)))
+                    pass
+                if t == '':
+                    continue
+                f.write(t)
+            f.close()
+
+    return Outcome(total_hits, total_possible_hits, true_positives, time.perf_counter() - start_time)
 
 
 def pyap_guesser(document):
@@ -209,28 +278,48 @@ def pyap_guesser(document):
         word = text[start: end + 1]
         surroundings = text[start - 10: end + 11]
 
-        a = Answer(document.doc_id, word, surroundings)
+        a = Answer(document.doc_id, word, surroundings, (start, end))
         r = Result(a.doc_id, a)
         results.append(r)
 
     addresses = pyap.parse(text, country='us')
 
     if not addresses == None:
-        for r in addresses:
-            g = Guess(document.doc_id, str(r), 'none')
+        for re_guess in addresses:
+            guess = Guess(document.doc_id, str(re_guess), 'none', (re_guess.as_dict()[
+                          'match_start'], re_guess.as_dict()['match_end']))
             found = False
             for result in results:
-                if result.compare(g):
+                if result.answered == True:
+                    continue
+                if result.cordinate_compare(guess):
                     found = True
                     break
-            if not found:
-                a = Result(g.doc_id, None, g)
-                a.classify()
-                results.append(a)
 
+            if not found:
+                for result in results:
+                    if result.answered == True:
+                        continue
+                    if result.compare(guess):
+                        found = True
+                        break
+
+            if not found:
+                for result in results:
+                    if result.answered == True:
+                        continue
+                    if result.partial_compare(guess):
+                        found = True
+                        break
+
+            if not found:
+                result = Result(guess.doc_id, None, guess)
+                result .classify()
+                results.append(result)
         return results
 
-def guesser(document):
+
+def regex_guesser(document):
     text = document.read()
     results = []
 
@@ -240,15 +329,16 @@ def guesser(document):
         word = text[start: end + 1]
         surroundings = text[start - 10: end + 11]
 
-        a = Answer(document.doc_id, word, surroundings)
+        a = Answer(document.doc_id, word, surroundings, (start, end))
         r = Result(a.doc_id, a)
         results.append(r)
 
-    pattern = '((?:(?<=[\s:\(\[\/\-\~c\\u200c])(?<!(\.org\/)|(doi:\s))1?[0-9]\.\d{1,4}\s?(?:\/\s?1?\d\.?\d{0,4})?)|(?:(?<=GPA[\s:])\d))'
+    pattern = ''
     rs = re.finditer(pattern, text, re.IGNORECASE)
     if not rs == None:
         for r in rs:
-            g = Guess(document.doc_id, r.group(), text[r.span()[0] - 10:r.span()[1] + 10])
+            g = Guess(document.doc_id, r.group(),
+                      text[r.span()[0] - 10:r.span()[1] + 10], r.span())
             found = False
             for result in results:
                 if result.compare(g):
@@ -260,6 +350,3 @@ def guesser(document):
                 results.append(a)
 
         return results
-
-def normalize_characters(word):
-    return re.sub(r'[^a-zA-Z0-9]', '', word)

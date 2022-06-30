@@ -1,25 +1,22 @@
 '''
-Read Offline & Online Data
-Save Online data into Offline
+LRP Config/Main File
+Alter test settings here
 '''
-
-import re
-import os
-import datetime
-from enum import Enum
 
 import keyfile
 import tester
 
-verbose = True
-category = 'address'
+debug = True
+category = ''
 source = ''
+kfilename = ''
 
 def main():
-    keyfile.build('address','sources')
-    kfile = keyfile.read("address_2022-06-28.json")
+    keyfile.build(category, source, kfilename)
+    kfile = keyfile.read(kfilename)
     kfile.data_folder_integratity()
-    outcome = tester.test(kfile.documents)
+    outcome = tester.test(kfile.documents, debug)
     print(outcome)
+
 
 main()

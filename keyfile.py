@@ -3,6 +3,7 @@ import os
 import datetime
 import uuid
 import json
+import re
 from urllib.request import urlopen
 from urllib.error import HTTPError
 
@@ -19,7 +20,7 @@ class Document:
 
     def download(self):
         try:
-            with urlopen(self.doc_url) as webpage:
+            with urlopen(url_space_fix(self.doc_url)) as webpage:
                 doc_text = webpage.read().decode()
                 doc_filename = '{}/{}.txt'.format(
                     self.data_folder, self.doc_id)
@@ -99,13 +100,13 @@ def read(key_filename):
 category. It writes it into a json file and returns the new keyfile.'''
 
 
-def build(category, source):
+def build(category, source, kfilename):
     print("[Building Keyfile]")
     date = datetime.datetime.now().date()
     filename = "{}_{}.json".format(category, date)
     documents = []
 
-    if os.path.exists(filename):
+    if os.path.exists(filename) or os.path.exists(kfilename):
         print("Key file exists")
         return
 
@@ -138,3 +139,6 @@ def read_labelbox_file(file, category):
 
             documents.append(Document(doc_url, uuid.uuid4(), answers, None))
         return documents
+
+def url_space_fix(url):
+    return re.sub('\ ','%20', url)
